@@ -94,6 +94,11 @@ def execute_slack_action(action_json):
                     break
 
             if channel_id:
+                # Join the channel first
+                try:
+                    slack_client.conversations_join(channel=channel_id)
+                except:
+                    pass  # Already in channel or can't join
                 slack_client.chat_postMessage(channel=channel_id, text=message)
                 return f"Message sent to #{channel}: {message}"
             else:
