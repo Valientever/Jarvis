@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JARVIS Voice Assistant</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            text-align: center;
+            padding: 40px 0;
+        }
+
+        h1 {
+            font-size: 3rem;
+            background: linear-gradient(90deg, #00d4ff, #0099ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #888;
+            font-size: 1.1rem;
+        }
+
+        .chat-container {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 20px;
+            padding: 20px;
+            margin-bottom: 20px;
+            height: 400px;
+            overflow-y: auto;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            padding: 12px 18px;
+            border-radius: 18px;
+            max-width: 80%;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .user-message {
+            background: linear-gradient(135deg, #0099ff, #00d4ff);
+            margin-left: auto;
+            text-align: right;
+        }
+
+        .jarvis-message {
+            background: rgba(255, 255, 255, 0.1);
+            margin-right: auto;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 15px 20px;
+            border: none;
+            border-radius: 30px;
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            font-size: 1rem;
+            outline: none;
+        }
+
+        input[type="text"]::placeholder {
+            color: #666;
+        }
+
+        input[type="text"]:focus {
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        button {
+            padding: 15px 30px;
+            border: none;
+            border-radius: 30px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .send-btn {
+            background: linear-gradient(135deg, #0099ff, #00d4ff);
+            color: #fff;
+        }
+
+        .send-btn:hover {
+            transform: scale(1.05);
+        }
+
+        .voice-btn {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+        }
+
+        .voice-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .voice-btn.recording {
+            background: linear-gradient(135deg, #ff4444, #ff6666);
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
+        .voice-controls {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .clear-btn {
+            background: rgba(255, 100, 100, 0.2);
+            color: #ff6666;
+        }
+
+        .clear-btn:hover {
+            background: rgba(255, 100, 100, 0.3);
+        }
+
+        .status {
+            text-align: center;
+            color: #666;
+            margin-top: 10px;
+            min-height: 20px;
+        }
+
+        .speaking {
+            color: #00d4ff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>JARVIS</h1>
+            <p class="subtitle">Your AI Voice Assistant</p>
+        </header>
+
+        <div class="chat-container" id="chatContainer">
+            <div class="message jarvis-message">
+                Hello! I'm JARVIS. How can I help you today? You can type a message or click the microphone to speak.
+            </div>
+        </div>
+
+        <div class="controls">
+            <input type="text" id="textInput" placeholder="Type a message..." onkeypress="handleKeyPress(event)">
+            <button class="send-btn" onclick="sendText()">Send</button>
+        </div>
+
+        <div class="voice-controls">
+            <button class="voice-btn" id="voiceBtn" onclick="toggleRecording()">🎤</button>
+            <button class="clear-btn" onclick="clearChat()">Clear Chat</button>
+        </div>
+
+        <p class="status" id="status"></p>
+    </div>
+
+    <script>
+        let mediaRecorder;
+        let audioChunks = [];
+        let isRecording = false;
+
+        function addMessage(text, isUser) {
+            const container = document.getElementById('chatContainer');
+            const div = document.createElement('div');
+            div.className = `message ${isUser ? 'user-message' : 'jarvis-message'}`;
+            div.textContent = text;
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function setStatus(text, isActive = false) {
+            const status = document.getElementById('status');
+            status.textContent = text;
+            status.className = isActive ? 'status speaking' : 'status';
+        }
+
+        function speak(text) {
+            if ('speechSynthesis' in window) {
+                setStatus('Speaking...', true);
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+                utterance.onend = () => setStatus('');
+                speechSynthesis.speak(utterance);
+            }
+        }
+
+        async function sendText() {
+            const input = document.getElementById('textInput');
+            const text = input.value.trim();
+            if (!text) return;
+
+            input.value = '';
+            addMessage(text, true);
+            setStatus('Thinking...');
+
+            try {
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: text })
+                });
+
+                const data = await response.json();
+                if (data.response) {
+                    addMessage(data.response, false);
+                    speak(data.response);
+                } else {
+                    setStatus('Error: ' + (data.error || 'Unknown error'));
+                }
+            } catch (err) {
+                setStatus('Connection error');
+            }
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') sendText();
+        }
+
+        async function toggleRecording() {
+            const btn = document.getElementById('voiceBtn');
+
+            if (!isRecording) {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    mediaRecorder = new MediaRecorder(stream);
+                    audioChunks = [];
+
+                    mediaRecorder.ondataavailable = (event) => {
+                        audioChunks.push(event.data);
+                    };
+
+                    mediaRecorder.onstop = async () => {
+                        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                        const reader = new FileReader();
+                        reader.onloadend = async () => {
+                            setStatus('Processing...');
+                            try {
+                                const response = await fetch('/voice', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ audio: reader.result })
+                                });
+
+                                const data = await response.json();
+                                if (data.transcription) {
+                                    addMessage(data.transcription, true);
+                                    addMessage(data.response, false);
+                                    speak(data.response);
+                                } else {
+                                    setStatus('Error: ' + (data.error || 'Could not understand'));
+                                }
+                            } catch (err) {
+                                setStatus('Connection error');
+                            }
+                        };
+                        reader.readAsDataURL(audioBlob);
+                        stream.getTracks().forEach(track => track.stop());
+                    };
+
+                    mediaRecorder.start();
+                    isRecording = true;
+                    btn.classList.add('recording');
+                    btn.textContent = '⏹️';
+                    setStatus('Recording... Click to stop');
+                } catch (err) {
+                    setStatus('Microphone access denied');
+                }
+            } else {
+                mediaRecorder.stop();
+                isRecording = false;
+                btn.classList.remove('recording');
+                btn.textContent = '🎤';
+            }
+        }
+
+        async function clearChat() {
+            document.getElementById('chatContainer').innerHTML =
+                '<div class="message jarvis-message">Chat cleared. How can I help you?</div>';
+            await fetch('/clear', { method: 'POST' });
+            speechSynthesis.cancel();
+            setStatus('');
+        }
+    </script>
+</body>
+</html>
