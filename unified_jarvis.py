@@ -2,15 +2,21 @@ import os
 import tempfile
 import base64
 import threading
+import json
+import re
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
+from slack_sdk import WebClient
 from groq import Groq
 import whisper
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Slack client for sending messages programmatically
+slack_client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
 
 # Initialize AI
 client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
@@ -19,9 +25,19 @@ SYSTEM_PROMPT = """You are JARVIS, a helpful AI assistant created by the user. Y
 Keep responses brief and conversational. Use a professional but warm tone.
 Avoid using markdown, bullet points, or special formatting - just speak naturally.
 
-You are currently integrated with Slack and a web voice interface. When users message you, just respond helpfully to their questions or requests. Do not say you cannot access things - just answer their questions directly.
+You can perform Slack actions when asked. When the user asks you to do something with Slack, respond with a JSON command in this EXACT format (no other text):
+{"action": "ACTION_TYPE", "channel": "CHANNEL", "message": "MESSAGE"}
 
-Never say things like "I can't access your Slack" or "I don't have access to" - you are JARVIS, a capable assistant. If you don't know something, just say so simply."""
+Available actions:
+- send_message: Send a message to a Slack channel or user
+  Example: {"action": "send_message", "channel": "#general", "message": "Hello everyone!"}
+- read_messages: Read recent messages from a channel
+  Example: {"action": "read_messages", "channel": "#general"}
+- list_channels: List available Slack channels
+  Example: {"action": "list_channels"}
+
+For normal conversation (not Slack actions), respond naturally without JSON.
+If you don't know something, just say so simply."""
 
 # Shared conversation history (keyed by user_id)
 conversation_history = {}
@@ -54,6 +70,78 @@ def get_ai_response(user_id: str, message: str) -> str:
     conversation_history[user_id].append({"role": "assistant", "content": assistant_message})
 
     return assistant_message
+
+# ============== Slack Actions ==============
+
+def execute_slack_action(action_json):
+    """Execute a Slack action from JSON command"""
+    try:
+        action = action_json.get("action")
+        channel = action_json.get("channel", "")
+        message = action_json.get("message", "")
+
+        # Clean channel name
+        if channel.startswith("#"):
+            channel = channel[1:]
+
+        if action == "send_message":
+            # Find channel ID
+            channels = slack_client.conversations_list(types="public_channel,private_channel")
+            channel_id = None
+            for ch in channels["channels"]:
+                if ch["name"] == channel:
+                    channel_id = ch["id"]
+                    break
+
+            if channel_id:
+                slack_client.chat_postMessage(channel=channel_id, text=message)
+                return f"Message sent to #{channel}: {message}"
+            else:
+                return f"Could not find channel #{channel}"
+
+        elif action == "read_messages":
+            channels = slack_client.conversations_list(types="public_channel,private_channel")
+            channel_id = None
+            for ch in channels["channels"]:
+                if ch["name"] == channel:
+                    channel_id = ch["id"]
+                    break
+
+            if channel_id:
+                history = slack_client.conversations_history(channel=channel_id, limit=5)
+                messages = []
+                for msg in history["messages"]:
+                    if "text" in msg:
+                        messages.append(msg["text"])
+                if messages:
+                    return f"Recent messages in #{channel}: " + " ... ".join(messages[:3])
+                else:
+                    return f"No recent messages in #{channel}"
+            else:
+                return f"Could not find channel #{channel}"
+
+        elif action == "list_channels":
+            channels = slack_client.conversations_list(types="public_channel")
+            channel_names = [f"#{ch['name']}" for ch in channels["channels"]]
+            return f"Available channels: {', '.join(channel_names[:10])}"
+
+        else:
+            return f"Unknown action: {action}"
+
+    except Exception as e:
+        return f"Slack error: {str(e)}"
+
+def process_response(response):
+    """Check if response contains a Slack action and execute it"""
+    try:
+        # Try to parse as JSON
+        json_match = re.search(r'\{[^{}]*"action"[^{}]*\}', response)
+        if json_match:
+            action_json = json.loads(json_match.group())
+            return execute_slack_action(action_json)
+    except:
+        pass
+    return response
 
 # ============== Flask Web Server ==============
 
@@ -104,9 +192,11 @@ def voice():
             return jsonify({'error': 'Could not understand audio'}), 400
 
         response = get_ai_response(user_id, text)
+        # Process any Slack actions in the response
+        final_response = process_response(response)
         return jsonify({
             'transcription': text,
-            'response': response
+            'response': final_response
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
