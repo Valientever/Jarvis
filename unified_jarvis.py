@@ -64,6 +64,10 @@ CORS(flask_app)
 def index():
     return send_from_directory('.', 'index.html')
 
+@flask_app.route('/local_jarvis.py')
+def download_local_client():
+    return send_from_directory('.', 'local_jarvis.py')
+
 @flask_app.route('/chat', methods=['POST'])
 def chat():
     data = request.json
